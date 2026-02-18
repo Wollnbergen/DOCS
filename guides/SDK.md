@@ -16,7 +16,7 @@ Build on Sultan L1 - a zero-fee, high-throughput blockchain with native token fa
 | **Zero Fees** | All transactions FREE forever |
 | **80,000+ TPS** | 20 shards × 4,000 TPS each |
 | **2-Second Blocks** | Instant finality |
-| **Native DEX** | Built-in AMM, no smart contracts needed |
+| **Native DEX** | Built-in AMM with protocol-level support |
 | **Token Factory** | Create tokens in one API call |
 | **Cross-Chain** | BTC, ETH, SOL, TON bridges |
 
@@ -744,7 +744,7 @@ async function claimRewards(
 
 ## Token Factory API
 
-Create and manage custom tokens without smart contracts!
+Create and manage custom tokens natively!
 
 ### Create a Token
 
@@ -1370,8 +1370,8 @@ async function waitForConfirmation(hash: string, timeout = 30000) {
 ## Support
 
 - **Documentation:** https://docs.sltn.io
-- **API Reference:** [API_REFERENCE.md](API_REFERENCE.md)
-- **RPC Specification:** [RPC_SPECIFICATION.md](RPC_SPECIFICATION.md)
+- **API Reference:** [API_REFERENCE.md](../api/API_REFERENCE.md)
+- **RPC Specification:** [RPC_SPECIFICATION.md](../api/RPC_SPECIFICATION.md)
 - **Discord:** https://discord.gg/sultanchain
 - **GitHub:** https://github.com/sultanchain
 

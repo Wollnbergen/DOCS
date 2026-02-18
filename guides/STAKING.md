@@ -273,7 +273,7 @@ When selecting a validator to delegate to, consider:
 
 To run your own validator (minimum 10,000 SLTN):
 
-1. See the [Validator Guide](../../VALIDATOR_GUIDE.md)
+1. See the [Validator Guide](https://github.com/Sultan-Labs/0xv7/blob/main/VALIDATOR_GUIDE.md)
 2. Download the sultan-node binary
 3. Configure with your stake and validator address
 4. Connect to the network
