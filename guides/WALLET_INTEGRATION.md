@@ -1,391 +1,314 @@
 # Wallet Integration Guide
 
-Connect your dApp to Sultan Wallet (browser extension and PWA).
+Connect your dApp to Sultan Wallet via WalletLink (deep links + encrypted WebSocket relay).
 
 ## Overview
 
-Sultan Wallet supports multiple connection methods:
+Sultan Wallet supports two connection methods:
 
-| Platform | Method | Best For |
-|----------|--------|----------|
-| Desktop Browser | Extension | Desktop dApps |
-| Mobile Browser | WalletLink/QR | Mobile dApps |
-| Mobile App | Deep Link | Mobile-to-mobile |
+| Method | How It Works | Best For |
+|--------|-------------|----------|
+| **WalletLink** | Deep link → WebSocket relay → encrypted P2P | Cross-origin dApps, mobile |
+| **Extension API** | `window.sultanWallet` injected provider | Same-origin, desktop |
+
+WalletLink is the primary integration path. It works everywhere — desktop browsers, mobile browsers, and across different origins (e.g., your dApp on `yourdapp.com` connecting to Sultan Wallet at `wallet.sltn.io`).
 
 ## Quick Start
 
-### Install SDK
+### 1. Copy the WalletLink Client
+
+Copy [`walletLink.ts`](https://github.com/Sultan-Labs/hodl-holdings/blob/main/client/src/api/walletLink.ts) from the reference app into your project. This is the complete client (~680 lines) with encryption, relay communication, and session management built in.
 
 ```bash
-npm install @sultan/wallet-sdk
+# From the reference app
+curl -o src/api/walletLink.ts \
+  https://raw.githubusercontent.com/Sultan-Labs/hodl-holdings/main/client/src/api/walletLink.ts
 ```
 
-### Basic Connection
+### 2. Connect a Wallet
 
 ```typescript
-import { SultanWalletSDK } from '@sultan/wallet-sdk';
+import { getWalletLink } from './api/walletLink';
 
-const wallet = new SultanWalletSDK();
+const walletLink = getWalletLink();
 
-// Connect - auto-detects best method
-const account = await wallet.connect();
-console.log('Connected:', account.address);
+// Generate session and get deep link URL
+const { deepLinkUrl } = await walletLink.generateSession();
 
-// Sign a transaction
-const signed = await wallet.signTransaction({
-  to: 'sultan1recipient...',
-  amount: '1000000000', // 1 SLTN
-  memo: 'Payment'
-});
+// Open wallet (redirect or new tab)
+window.open(deepLinkUrl, '_blank');
 
-// Submit transaction
-const result = await fetch('https://rpc.sltn.io/tx', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify(signed)
-}).then(r => r.json());
-
-console.log('TX Hash:', result.hash);
-```
-
-## Connection Methods
-
-### Auto-Detection (Recommended)
-
-```typescript
-const wallet = new SultanWalletSDK();
-const account = await wallet.connect();
-
-// SDK automatically:
-// 1. Checks for browser extension
-// 2. Falls back to WalletLink QR code
-// 3. On mobile, uses deep link to Sultan Wallet app
-```
-
-### Force Specific Method
-
-```typescript
-// Force WalletLink even if extension is installed
-const wallet = new SultanWalletSDK({
-  forceWalletLink: true
-});
-
-// Check what's available
-if (SultanWalletSDK.isExtensionAvailable()) {
-  console.log('Extension detected');
-}
-
-if (SultanWalletSDK.isMobile()) {
-  console.log('Mobile browser - will use deep link');
-}
-```
-
-## Configuration Options
-
-```typescript
-const wallet = new SultanWalletSDK({
-  // Force WalletLink even if extension is available
-  forceWalletLink: false,
-  
-  // Custom relay server for WalletLink
-  relayUrl: 'wss://relay.sltn.io',
-  
-  // Container ID for QR code or connect button
-  qrContainerId: 'wallet-connect-container',
-  
-  // Auto-redirect to wallet app on mobile
-  autoRedirectMobile: true,
-  
-  // Callbacks
-  onQRReady: (qrData) => {
-    console.log('QR code ready');
-  },
-  onDeepLinkReady: (url) => {
-    console.log('Deep link:', url);
-  },
-  onWaiting: () => {
-    console.log('Waiting for wallet approval...');
-  }
-});
-```
-
-## Event Handling
-
-```typescript
-// Account changed (user switched accounts in wallet)
-wallet.on('accountChange', (account) => {
-  console.log('New account:', account.address);
-  // Update your app state
-});
-
-// Wallet disconnected
-wallet.on('disconnect', () => {
-  console.log('Wallet disconnected');
-  // Clear session, show connect button
-});
-
-// Network changed
-wallet.on('networkChange', (network) => {
-  console.log('Network:', network.chainId);
-});
-
-// Clean disconnect
-wallet.disconnect();
-```
-
-## Signing Transactions
-
-### Simple Transfer
-
-```typescript
-const signed = await wallet.signTransaction({
-  to: 'sultan1recipient...',
-  amount: '1000000000',  // 1 SLTN in atomic units
-  memo: 'Payment for services'
-});
-```
-
-### With Full Control
-
-```typescript
-const signed = await wallet.signTransaction({
-  to: 'sultan1recipient...',
-  amount: '1000000000',
-  memo: '',
-  nonce: 5,  // Optional: specify nonce
-  timestamp: Math.floor(Date.now() / 1000)  // Optional: specify timestamp
-});
-```
-
-### Token Transfer
-
-```typescript
-const signed = await wallet.signTokenTransfer({
-  denom: 'factory/sultan1.../MTK',
-  to: 'sultan1recipient...',
-  amount: '1000000'
-});
-```
-
-## Signing Messages
-
-For signature verification (e.g., authentication):
-
-```typescript
-const message = 'Sign in to MyApp at ' + new Date().toISOString();
-const signature = await wallet.signMessage(message);
-
-// Verify on your server
-console.log({
-  message,
-  signature: signature.signature,  // hex encoded
-  publicKey: signature.publicKey,  // hex encoded
-  address: signature.address
-});
-```
-
-## Mobile Flow
-
-### Deep Link Flow (Mobile-to-Mobile)
-
-When your dApp runs in a mobile browser:
-
-1. SDK generates a WalletLink session
-2. Creates deep link: `https://wallet.sltn.io/connect?session=...`
-3. Shows "Open Sultan Wallet" button
-4. Auto-redirects after 500ms
-5. Wallet shows approval screen
-6. On approval, redirects back to your dApp
-
-```typescript
-const wallet = new SultanWalletSDK({
-  qrContainerId: 'connect-area',
-  autoRedirectMobile: true,
-  onDeepLinkReady: (deepLink) => {
-    // Custom handling if needed
-    console.log('Wallet deep link:', deepLink);
-  }
-});
-```
-
-### QR Code Flow (Desktop)
-
-When wallet is not installed on desktop:
-
-1. SDK displays QR code
-2. User scans with Sultan Wallet mobile app
-3. Wallet prompts for approval
-4. Connection established via relay
-
-```html
-<div id="wallet-connect-container">
-  <!-- QR code will be rendered here -->
-</div>
-```
-
-```typescript
-const wallet = new SultanWalletSDK({
-  qrContainerId: 'wallet-connect-container',
-  onQRReady: (qrData) => {
-    // QR code is now visible
-    document.getElementById('status').textContent = 'Scan QR code with Sultan Wallet';
-  }
-});
-```
-
-## Session Persistence
-
-```typescript
-// Check if user was previously connected
-const session = SultanWalletSDK.getStoredSession();
-if (session) {
-  // Restore session
-  wallet.restoreSession(session);
-  console.log('Reconnected:', session.address);
-}
-
-// Explicitly save session
-wallet.on('connect', (account) => {
-  SultanWalletSDK.storeSession(account);
-});
-
-// Clear session on disconnect
-wallet.on('disconnect', () => {
-  SultanWalletSDK.clearSession();
-});
-```
-
-## Error Handling
-
-```typescript
-try {
-  const account = await wallet.connect();
-} catch (error) {
-  if (error.code === 'USER_REJECTED') {
-    console.log('User rejected connection');
-  } else if (error.code === 'TIMEOUT') {
-    console.log('Connection timed out');
-  } else if (error.code === 'NETWORK_ERROR') {
-    console.log('Network error - check internet connection');
-  } else {
-    console.error('Unknown error:', error);
-  }
-}
-```
-
-## Without SDK (Direct Integration)
-
-If you don't want to use the SDK, you can integrate directly using the WalletLink client.
-
-### Reference Implementation
-
-**HODL Holdings** is a fully working reference implementation:
-
-- **Live Demo:** https://hodl.sltn.io
-- **Source:** https://github.com/Sultan-Labs/hodl-holdings
-
-Key files to copy:
-- `src/api/walletLink.ts` - Complete WalletLink client (~600 lines)
-- `src/components/WalletConnectModal.tsx` - React connection UI
-- `src/hooks/useWallet.ts` - Wallet state management
-
-### WalletLink Client
-
-Copy the full implementation from [hodl-holdings/src/api/walletLink.ts](https://github.com/Sultan-Labs/hodl-holdings/blob/main/src/api/walletLink.ts)
-
-```typescript
-import { walletLink } from './api/walletLink';
-
-// 1. Generate session
-const { deepLinkUrl, sessionId } = await walletLink.generateSession();
-
-// 2. Show QR code or "Open Wallet" button
-// deepLinkUrl = "https://wallet.sltn.io/connect?session=..."
-
-// 3. Wait for connection
-const address = await walletLink.waitForConnection(120000);
+// Wait for the user to approve in their wallet (up to 2 min timeout)
+const address = await walletLink.waitForConnection();
 console.log('Connected:', address);
+// → "sultan1abc123..."
+```
 
-// 4. Request signature
-const { signature, publicKey } = await walletLink.signMessage({
-  type: 'transfer',
-  from: address,
-  to: 'sultan1recipient...',
-  amount: '1000000000',
-  timestamp: Date.now(),
-  nonce: 0
-});
+### 3. Request a Signature
 
-// 5. Submit to RPC
-await fetch('https://rpc.sltn.io/transaction', {
+```typescript
+const { signature, publicKey } = await walletLink.signMessage(
+  JSON.stringify({
+    type: 'transfer',
+    from: address,
+    to: 'sultan1recipient...',
+    amount: '1000000000', // 1 SLTN (9 decimals)
+    timestamp: Date.now(),
+    nonce: 0
+  })
+);
+```
+
+### 4. Submit Transaction
+
+```typescript
+const result = await fetch('https://rpc.sltn.io/transaction', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
-    tx: { from: address, to, amount, timestamp, nonce },
+    tx: { from: address, to: 'sultan1recipient...', amount: '1000000000', timestamp, nonce: 0 },
     signature,
     public_key: publicKey
   })
 });
 ```
 
-### Extension API
+## Full API Reference
+
+### `getWalletLink(): WalletLinkClient`
+
+Returns the singleton WalletLink client instance.
+
+### `walletLink.generateSession(): Promise<{ deepLinkUrl: string; sessionId: string }>`
+
+Creates a new encrypted session on the relay server and returns a deep link URL. The URL points to `https://wallet.sltn.io/connect?session=<encoded-data>` which the wallet uses to join the session.
+
+### `walletLink.waitForConnection(timeoutMs?: number): Promise<string>`
+
+Waits for the wallet to approve the connection. Returns the wallet address. Default timeout is 120 seconds.
+
+### `walletLink.signMessage(message: string): Promise<{ signature: string; publicKey: string }>`
+
+Sends a signature request to the connected wallet. The wallet will show an approval prompt to the user. Returns the Ed25519 signature and public key (both hex-encoded).
+
+### `walletLink.isConnected(): boolean`
+
+Returns whether a wallet is currently connected.
+
+### `walletLink.getAddress(): string | null`
+
+Returns the connected wallet address, or null.
+
+### `walletLink.getPublicKey(): string | null`
+
+Returns the connected wallet's public key (hex), or null.
+
+### `walletLink.disconnect(): Promise<void>`
+
+Ends the session and closes the relay connection.
+
+### `walletLink.on(handler): () => void`
+
+Subscribe to events. Returns an unsubscribe function.
 
 ```typescript
-// Check if extension is installed
+const unsubscribe = walletLink.on((event) => {
+  switch (event.type) {
+    case 'connected':
+      console.log('Wallet connected:', event.data);
+      break;
+    case 'disconnected':
+      console.log('Wallet disconnected');
+      break;
+    case 'error':
+      console.error('Error:', event.data);
+      break;
+  }
+});
+
+// Later: unsubscribe()
+```
+
+### `walletLink.restoreSession(): Promise<boolean>`
+
+Attempts to restore a previously saved session from `sessionStorage`. Returns true if a valid session was restored (sessions expire after 10 minutes).
+
+## React Integration
+
+See the reference app for a complete React implementation:
+
+- [`useWallet.ts`](https://github.com/Sultan-Labs/hodl-holdings/blob/main/client/src/lib/wallet.ts) — React hook with `connectPWA()`, `disconnect()`, state management
+- [`WalletConnectModal.tsx`](https://github.com/Sultan-Labs/hodl-holdings/blob/main/client/src/components/WalletConnectModal.tsx) — Connection UI with auto-open wallet tab
+
+### Minimal React Example
+
+```tsx
+import { useState } from 'react';
+import { getWalletLink } from './api/walletLink';
+
+function ConnectButton() {
+  const [address, setAddress] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState(false);
+
+  const connect = async () => {
+    setConnecting(true);
+    try {
+      const walletLink = getWalletLink();
+      const { deepLinkUrl } = await walletLink.generateSession();
+
+      // Open wallet in new tab (must happen during user gesture)
+      window.open(deepLinkUrl, '_blank');
+
+      // Wait for approval
+      const addr = await walletLink.waitForConnection();
+      setAddress(addr);
+    } catch (err) {
+      console.error('Connection failed:', err);
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  if (address) {
+    return <span>{address.slice(0, 12)}...{address.slice(-6)}</span>;
+  }
+
+  return (
+    <button onClick={connect} disabled={connecting}>
+      {connecting ? 'Waiting for wallet...' : 'Connect Wallet'}
+    </button>
+  );
+}
+```
+
+## Extension API (Optional)
+
+If the Sultan Wallet browser extension is installed, you can also connect via the injected provider:
+
+```typescript
 if (window.sultanWallet) {
-  // Request connection
   const account = await window.sultanWallet.connect();
-  
-  // Sign transaction
+  console.log('Address:', account.address);
+
   const signed = await window.sultanWallet.signTransaction({
-    to: 'sultan1...',
+    to: 'sultan1recipient...',
     amount: '1000000000'
   });
 }
 ```
 
-### WalletLink Protocol Details
+The reference app auto-detects the extension and falls back to WalletLink when it's not available.
 
-**Relay Server:** `wss://sultan-walletlink-relay.fly.dev`
+## Protocol Details
 
-**Deep Link Format:**
+### How WalletLink Works
+
+```
+┌──────────┐         ┌──────────────┐        ┌────────────┐
+│  Your    │   WSS   │  Relay       │  WSS   │  Sultan    │
+│  dApp    │◄───────►│  Server      │◄──────►│  Wallet    │
+│          │         │  (Fly.io)    │        │  (PWA)     │
+└──────────┘         └──────────────┘        └────────────┘
+     │                                              │
+     │  1. session_init ──────────────────►          │
+     │  2. ◄── session_ack (machineId)               │
+     │  3. Generate deep link with session data      │
+     │  4. Open wallet.sltn.io/connect?session=...  │
+     │                                    5. Parse session ──►│
+     │                              6. session_join ──────►   │
+     │  7. ◄── connect_response (address, pubkey)    │
+     │  8. sign_message_request ──────────────────►  │
+     │  9. ◄── sign_message_response (signature)     │
+```
+
+All messages between dApp and wallet are **AES-256-GCM encrypted** using a key derived via HKDF-SHA256 from the shared session key. The relay server cannot read message contents.
+
+### Relay Server
+
+- **URL:** `wss://sultan-walletlink-relay.fly.dev`
+- **Health:** `https://sultan-walletlink-relay.fly.dev/health`
+- **Source:** [`Sultan-Labs/PWA/server/relay-server.ts`](https://github.com/Sultan-Labs/PWA/tree/main/server)
+
+### Deep Link Format
+
 ```
 https://wallet.sltn.io/connect?session=<encoded-sultan-url>
 ```
 
 Where `<encoded-sultan-url>` is URL-encoded:
+
 ```
-sultan://wl?s=<sessionId>&k=<base64Key>&b=<relayUrl>&n=<appName>&o=<origin>
+sultan://wl?s=<sessionId>&k=<base64Key>&b=<relayUrl>&m=<machineId>&n=<appName>&o=<origin>
 ```
 
-| Parameter | Description |
-|-----------|-------------|
-| `s` | Session ID (UUID v4) |
-| `k` | Session key (32 bytes, URL-safe base64) |
-| `b` | Relay WebSocket URL |
-| `n` | Your app name |
-| `o` | Your app origin |
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `s` | Yes | Session ID (UUID v4) |
+| `k` | Yes | Session key (32 bytes, URL-safe base64) |
+| `b` | Yes | Relay WebSocket URL |
+| `m` | No | Relay machine ID (for multi-instance routing) |
+| `n` | No | Your app name (shown in wallet approval screen) |
+| `o` | No | Your app origin (shown in wallet approval screen) |
 
-**Message Types:**
+### Message Types
 
 | Type | Direction | Description |
 |------|-----------|-------------|
 | `session_init` | dApp → Relay | Initialize session |
-| `connect_response` | Wallet → dApp | Connection approval |
+| `session_ack` | Relay → dApp | Session confirmed (includes `machineId`) |
+| `session_join` | Wallet → Relay | Wallet joins session |
+| `connect_response` | Wallet → dApp | Wallet address + public key |
 | `sign_message_request` | dApp → Wallet | Request signature |
-| `sign_message_response` | Wallet → dApp | Return signature |
+| `sign_message_response` | Wallet → dApp | Ed25519 signature |
+| `session_end` | Either → Relay | End session |
+| `heartbeat` | Either → Relay | Keep connection alive |
 
-**Encryption:** All messages are AES-256-GCM encrypted with a key derived via HKDF-SHA256 from the session key.
+### Encryption
 
-## Security Best Practices
+- **Algorithm:** AES-256-GCM
+- **Key Derivation:** HKDF-SHA256 from 32-byte session key
+- **IV:** Random 12 bytes per message
+- **Format:** Base64-encoded `iv + ciphertext`
+- **Wrapped in:** JSON envelope `{ sessionId, type, data: "<encrypted>" }` for relay routing
 
-1. **Validate addresses** - Always validate sultan1... addresses before use
-2. **Handle disconnects** - Clear sensitive state when wallet disconnects
-3. **HTTPS only** - Always use HTTPS for production dApps
-4. **Don't store keys** - Never ask users to enter private keys
+## Sultan L1 Basics
+
+| Property | Value |
+|----------|-------|
+| Chain ID | `sultan-1` |
+| Token | SLTN |
+| Decimals | 9 |
+| Address prefix | `sultan1` |
+| Signature | Ed25519 |
+| Gas fees | $0.00 (zero-fee) |
+| RPC | `https://rpc.sltn.io` |
+
+## Reference Implementation
+
+**HODL Holdings** is the fully working reference dApp:
+
+- **Live:** [hodlholdings.com](https://hodlholdings.com)
+- **Source:** [Sultan-Labs/hodl-holdings](https://github.com/Sultan-Labs/hodl-holdings)
+
+Key files:
+| File | Purpose |
+|------|---------|
+| [`client/src/api/walletLink.ts`](https://github.com/Sultan-Labs/hodl-holdings/blob/main/client/src/api/walletLink.ts) | Complete WalletLink client |
+| [`client/src/lib/wallet.ts`](https://github.com/Sultan-Labs/hodl-holdings/blob/main/client/src/lib/wallet.ts) | React `useWallet()` hook |
+| [`client/src/components/WalletConnectModal.tsx`](https://github.com/Sultan-Labs/hodl-holdings/blob/main/client/src/components/WalletConnectModal.tsx) | Connection modal UI |
+
+## Security
+
+1. **End-to-end encrypted** — Relay never sees message contents
+2. **Session keys are ephemeral** — Generated per connection, not stored long-term
+3. **User approval required** — Wallet shows approval screen for connections and signatures
+4. **HTTPS only** — Always use HTTPS in production
+5. **Validate addresses** — Always validate `sultan1...` addresses before use
+6. **Never ask for private keys** — WalletLink handles signing securely in the wallet
 
 ## Next Steps
 
-- [Quick Start Guide](QUICK_START.md) - Basic integration
-- [SDK Documentation](SDK.md) - Full SDK reference
-- [API Reference](../api/API_REFERENCE.md) - Complete API documentation
+- [Quick Start Guide](QUICK_START.md)
+- [API Reference](../api/API_REFERENCE.md)
+- [RPC Specification](../api/RPC_SPECIFICATION.md)
+- [Token Factory Guide](TOKEN_FACTORY.md)
